@@ -15,6 +15,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
 import io, { Socket } from 'socket.io-client';
 import { currentUserPhone } from '../../authStore';
 import { useTheme } from '../../ThemeContext';
@@ -23,7 +25,8 @@ const SOCKET_URL = 'http://10.120.123.254:3000';
 
 interface MessageItem {
   id: string;
-  text: string;
+  text?: string;
+  imageUri?: string;
   sender: 'me' | 'other';
   time: string;
 }
@@ -99,7 +102,8 @@ export default function ChatMessageScreen() {
             ...prev,
             {
               id: newMessage.id || Date.now().toString(),
-              text: newMessage.text,
+              text: newMessage.text || '',
+              imageUri: newMessage.imageUri,
               sender: 'other',
               time: newMessage.time || formatTime(new Date()),
             },
@@ -146,6 +150,94 @@ export default function ChatMessageScreen() {
     }, 50);
   };
 
+  // Open Device Gallery
+  const handlePickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Needed', 'Please allow gallery access to send photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        sendImageMessage(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.log('Error opening gallery: ', err);
+      Alert.alert('Error', 'Failed to open gallery.');
+    }
+  };
+
+  // Open Device Camera
+  const handleTakePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Needed', 'Please allow camera access to take photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        sendImageMessage(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.log('Error opening camera: ', err);
+      Alert.alert('Error', 'Failed to open camera.');
+    }
+  };
+
+  // Attachment Options Dialog (Gallery / Camera)
+  const handleAttachmentPress = () => {
+    Alert.alert(
+      'Share Media',
+      'Choose photo source:',
+      [
+        { text: '📷 Camera', onPress: handleTakePhoto },
+        { text: '🖼️ Gallery', onPress: handlePickImage },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+      { cancelable: true }
+    );
+  };
+
+  const sendImageMessage = (uri: string) => {
+    const timeNow = formatTime(new Date());
+    const newMsg: MessageItem = {
+      id: Date.now().toString(),
+      text: '',
+      imageUri: uri,
+      sender: 'me',
+      time: timeNow,
+    };
+
+    setMessages((prev) => [...prev, newMsg]);
+
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('sendMessage', {
+        to: contactId,
+        message: '📷 Photo',
+        imageUri: uri,
+        from: currentUserPhone,
+      });
+    }
+
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
   const handleCall = (type: 'voice' | 'video') => {
     Alert.alert(
       type === 'video' ? 'Video Call' : 'Voice Call',
@@ -153,8 +245,6 @@ export default function ChatMessageScreen() {
       [{ text: 'End Call', style: 'cancel' }]
     );
   };
-
-
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.header }]} edges={['top']}>
@@ -262,17 +352,44 @@ export default function ChatMessageScreen() {
                     isMe
                       ? [styles.myMessageBubble, { backgroundColor: theme.bubbleMine }]
                       : [styles.otherMessageBubble, { backgroundColor: theme.bubbleOther }],
+                    item.imageUri ? styles.imageBubble : null,
                   ]}
                 >
-                  <Text style={[styles.messageText, { color: isMe ? theme.textMine : theme.textOther }]}>
-                    {item.text}
-                  </Text>
+                  {item.imageUri ? (
+                    <View style={styles.imageWrapper}>
+                      <Image
+                        source={{ uri: item.imageUri }}
+                        style={styles.bubbleImage}
+                        contentFit="cover"
+                        transition={200}
+                      />
+                    </View>
+                  ) : null}
 
-                  <View style={styles.messageMeta}>
+                  {item.text ? (
+                    <Text
+                      style={[
+                        styles.messageText,
+                        { color: isMe ? theme.textMine : theme.textOther },
+                        item.imageUri ? { marginTop: 6, marginHorizontal: 4 } : null,
+                      ]}
+                    >
+                      {item.text}
+                    </Text>
+                  ) : null}
+
+                  <View
+                    style={[
+                      styles.messageMeta,
+                      item.imageUri && !item.text ? styles.imageMetaOverlay : null,
+                    ]}
+                  >
                     <Text
                       style={[
                         styles.messageTime,
-                        { color: isMe ? theme.timeMine : theme.timeOther },
+                        item.imageUri && !item.text
+                          ? styles.imageTimeText
+                          : { color: isMe ? theme.timeMine : theme.timeOther },
                       ]}
                     >
                       {item.time}
@@ -281,7 +398,7 @@ export default function ChatMessageScreen() {
                       <Ionicons
                         name="checkmark-done"
                         size={15}
-                        color="#53bdeb"
+                        color={item.imageUri && !item.text ? '#ffffff' : '#53bdeb'}
                         style={styles.checkIcon}
                       />
                     )}
@@ -321,19 +438,21 @@ export default function ChatMessageScreen() {
               maxLength={1000}
             />
 
+            {/* Gallery / Attachment Picker */}
             <TouchableOpacity
               style={styles.composerIconBtn}
               activeOpacity={0.7}
-              onPress={() => Alert.alert('Attachment', 'Share photos, documents, and contacts')}
+              onPress={handleAttachmentPress}
             >
               <Ionicons name="attach-outline" size={24} color={theme.iconColor} />
             </TouchableOpacity>
 
+            {/* Direct Camera Button */}
             {!message.trim() && (
               <TouchableOpacity
                 style={styles.composerIconBtn}
                 activeOpacity={0.7}
-                onPress={() => Alert.alert('Camera', 'Open camera')}
+                onPress={handleTakePhoto}
               >
                 <Ionicons name="camera-outline" size={23} color={theme.iconColor} />
               </TouchableOpacity>
@@ -475,6 +594,32 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 1,
     elevation: 1,
+  },
+  imageBubble: {
+    padding: 4,
+  },
+  imageWrapper: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  bubbleImage: {
+    width: 240,
+    height: 200,
+    borderRadius: 10,
+  },
+  imageMetaOverlay: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  imageTimeText: {
+    fontSize: 10,
+    color: '#ffffff',
+    fontWeight: '500',
   },
   myMessageBubble: {
     borderTopLeftRadius: 14,
