@@ -134,11 +134,6 @@ export default function LoginScreen() {
             </View>
           )}
         </View>
-
-        <View style={styles.metaFooter}>
-          <Text style={[styles.metaLabel, { color: theme.subText }]}>from</Text>
-          <Text style={[styles.metaText, { color: theme.accent }]}>META</Text>
-        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -273,21 +268,5 @@ const styles = StyleSheet.create({
   goBackText: {
     fontWeight: '600',
     fontSize: 14,
-  },
-  metaFooter: {
-    position: 'absolute',
-    bottom: 24,
-    alignItems: 'center',
-    opacity: 0.7,
-  },
-  metaLabel: {
-    fontSize: 12,
-    marginBottom: 2,
-    fontWeight: '600',
-  },
-  metaText: {
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 2,
   },
 });

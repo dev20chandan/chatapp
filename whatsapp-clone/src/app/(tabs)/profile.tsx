@@ -125,11 +125,6 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
         </View>
-
-        <View style={styles.footer}>
-          <Text style={[styles.footerLabel, { color: theme.subText }]}>from</Text>
-          <Text style={[styles.footerText, { color: theme.accent }]}>META</Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -236,21 +231,5 @@ const styles = StyleSheet.create({
   },
   settingSubtitle: {
     fontSize: 13,
-  },
-  footer: {
-    alignItems: 'center',
-    opacity: 0.7,
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  footerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  footerText: {
-    fontSize: 15,
-    fontWeight: '900',
-    letterSpacing: 2,
   },
 });
