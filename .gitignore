@@ -1,0 +1,28 @@
+# Node dependencies
+node_modules/
+*/node_modules/
+
+# Builds & Outputs
+dist/
+*/dist/
+web-build/
+*/web-build/
+.expo/
+*/.expo/
+
+# Native builds
+ios/
+android/
+*/ios/
+*/android/
+
+# Environment and logs
+.env*.local
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# OS files
+.DS_Store
+Thumbs.db
