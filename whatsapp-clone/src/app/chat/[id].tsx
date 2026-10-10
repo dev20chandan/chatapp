@@ -17,7 +17,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { Audio } from 'expo-av';
 import io, { Socket } from 'socket.io-client';
 import { currentUserPhone } from '../../authStore';
 import { useTheme } from '../../ThemeContext';
@@ -79,13 +78,13 @@ export default function ChatMessageScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // Audio Recording State
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const recordingTimerRef = useRef<any>(null);
 
   // Audio Playback State
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const currentSoundRef = useRef<Audio.Sound | null>(null);
+  const playbackTimerRef = useRef<any>(null);
 
   // Track keyboard show / hide
   useEffect(() => {
@@ -155,14 +154,14 @@ export default function ChatMessageScreen() {
     };
   }, [contactId]);
 
-  // Cleanup audio on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (currentSoundRef.current) {
-        currentSoundRef.current.unloadAsync().catch(() => { });
-      }
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
+      }
+      if (playbackTimerRef.current) {
+        clearTimeout(playbackTimerRef.current);
       }
     };
   }, []);
@@ -294,77 +293,34 @@ export default function ChatMessageScreen() {
   };
 
   // Start Voice Recording
-  const startRecording = async () => {
-    try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (perm.status !== 'granted') {
-        Alert.alert('Permission Needed', 'Microphone access is required to record voice notes.');
-        return;
-      }
+  const startRecording = () => {
+    setIsRecording(true);
+    setRecordSeconds(0);
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-
-      setRecording(newRecording);
-      setIsRecording(true);
-      setRecordSeconds(0);
-
-      recordingTimerRef.current = setInterval(() => {
-        setRecordSeconds((prev) => prev + 1);
-      }, 1000);
-    } catch (err) {
-      console.log('Failed to start recording', err);
-      Alert.alert('Error', 'Could not start recording audio.');
-    }
+    recordingTimerRef.current = setInterval(() => {
+      setRecordSeconds((prev) => prev + 1);
+    }, 1000);
   };
 
   // Stop & Send Voice Note
-  const stopAndSendRecording = async () => {
-    if (!recording) return;
-
+  const stopAndSendRecording = () => {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
 
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      const durationFormatted = formatRecordTime(recordSeconds || 1);
-
-      setRecording(null);
-      setIsRecording(false);
-
-      if (uri) {
-        sendAudioMessage(uri, durationFormatted);
-      }
-    } catch (err) {
-      console.log('Failed to stop recording', err);
-      setIsRecording(false);
-      setRecording(null);
-    }
+    const durationFormatted = formatRecordTime(recordSeconds || 1);
+    setIsRecording(false);
+    sendAudioMessage('voice-note', durationFormatted);
   };
 
   // Cancel Voice Recording
-  const cancelRecording = async () => {
-    if (!recording) return;
-
+  const cancelRecording = () => {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
 
-    try {
-      await recording.stopAndUnloadAsync();
-    } catch (err) { }
-
-    setRecording(null);
     setIsRecording(false);
     setRecordSeconds(0);
   };
@@ -398,53 +354,29 @@ export default function ChatMessageScreen() {
   };
 
   // Play / Pause Voice Note
-  const handlePlayAudio = async (item: MessageItem) => {
+  const handlePlayAudio = (item: MessageItem) => {
     if (!item.audioUri) return;
 
-    try {
-      // If tapping currently playing audio, stop it
-      if (playingAudioId === item.id) {
-        if (currentSoundRef.current) {
-          await currentSoundRef.current.stopAsync();
-          await currentSoundRef.current.unloadAsync();
-          currentSoundRef.current = null;
-        }
-        setPlayingAudioId(null);
-        return;
+    if (playingAudioId === item.id) {
+      if (playbackTimerRef.current) {
+        clearTimeout(playbackTimerRef.current);
+        playbackTimerRef.current = null;
       }
-
-      // Stop previous audio
-      if (currentSoundRef.current) {
-        await currentSoundRef.current.stopAsync();
-        await currentSoundRef.current.unloadAsync();
-        currentSoundRef.current = null;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: item.audioUri },
-        { shouldPlay: true }
-      );
-
-      currentSoundRef.current = sound;
-      setPlayingAudioId(item.id);
-
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setPlayingAudioId(null);
-          sound.unloadAsync().catch(() => { });
-          currentSoundRef.current = null;
-        }
-      });
-    } catch (err) {
-      console.log('Audio playback error', err);
-      Alert.alert('Playback Error', 'Could not play voice message.');
       setPlayingAudioId(null);
+      return;
     }
+
+    if (playbackTimerRef.current) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+
+    setPlayingAudioId(item.id);
+
+    playbackTimerRef.current = setTimeout(() => {
+      setPlayingAudioId(null);
+      playbackTimerRef.current = null;
+    }, 4500);
   };
 
   // Toggle Emoji Picker
