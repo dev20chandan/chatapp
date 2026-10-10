@@ -17,16 +17,38 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { Audio } from 'expo-av';
 import io, { Socket } from 'socket.io-client';
 import { currentUserPhone } from '../../authStore';
 import { useTheme } from '../../ThemeContext';
 
 const SOCKET_URL = 'http://10.120.123.254:3000';
 
+const EMOJIS = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
+  '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
+  '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+  '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
+  '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮',
+  '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓',
+  '🧐', '😕', '😟', '🙁', '😮', '😯', '😲', '😳', '🥺', '😦',
+  '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞',
+  '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿',
+  '💀', '💩', '🤡', '👻', '👽', '🤖', '👋', '🤚', '🖐️', '✋',
+  '🖖', '🤙', '👈', '👉', '👆', '👇', '☝️', '👍', '👎', '✊',
+  '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤝', '🙏', '✍️', '💪',
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+  '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '🔥',
+  '✨', '🌟', '💫', '💥', '💯', '🎉', '🎊', '🎈', '🎂', '🎁',
+  '☕', '🍕', '🍔', '🍟', '🍦', '🍩', '🍻', '🥂', '🍾', '🚀',
+];
+
 interface MessageItem {
   id: string;
   text?: string;
   imageUri?: string;
+  audioUri?: string;
+  audioDuration?: string;
   sender: 'me' | 'other';
   time: string;
 }
@@ -53,6 +75,18 @@ export default function ChatMessageScreen() {
   const socketRef = useRef<Socket | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
+  // Emoji Picker State
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Audio Recording State
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const recordingTimerRef = useRef<any>(null);
+
+  // Audio Playback State
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const currentSoundRef = useRef<Audio.Sound | null>(null);
+
   // Track keyboard show / hide
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -60,6 +94,7 @@ export default function ChatMessageScreen() {
 
     const showSub = Keyboard.addListener(showEvent, () => {
       setIsKeyboardVisible(true);
+      setShowEmojiPicker(false);
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 50);
@@ -104,6 +139,8 @@ export default function ChatMessageScreen() {
               id: newMessage.id || Date.now().toString(),
               text: newMessage.text || '',
               imageUri: newMessage.imageUri,
+              audioUri: newMessage.audioUri,
+              audioDuration: newMessage.audioDuration,
               sender: 'other',
               time: newMessage.time || formatTime(new Date()),
             },
@@ -118,8 +155,26 @@ export default function ChatMessageScreen() {
     };
   }, [contactId]);
 
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (currentSoundRef.current) {
+        currentSoundRef.current.unloadAsync().catch(() => { });
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatRecordTime = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   const handleSend = () => {
@@ -198,7 +253,7 @@ export default function ChatMessageScreen() {
     }
   };
 
-  // Attachment Options Dialog (Gallery / Camera)
+  // Attachment Options Dialog
   const handleAttachmentPress = () => {
     Alert.alert(
       'Share Media',
@@ -236,6 +291,170 @@ export default function ChatMessageScreen() {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
+  };
+
+  // Start Voice Recording
+  const startRecording = async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission Needed', 'Microphone access is required to record voice notes.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      setRecording(newRecording);
+      setIsRecording(true);
+      setRecordSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.log('Failed to start recording', err);
+      Alert.alert('Error', 'Could not start recording audio.');
+    }
+  };
+
+  // Stop & Send Voice Note
+  const stopAndSendRecording = async () => {
+    if (!recording) return;
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      const durationFormatted = formatRecordTime(recordSeconds || 1);
+
+      setRecording(null);
+      setIsRecording(false);
+
+      if (uri) {
+        sendAudioMessage(uri, durationFormatted);
+      }
+    } catch (err) {
+      console.log('Failed to stop recording', err);
+      setIsRecording(false);
+      setRecording(null);
+    }
+  };
+
+  // Cancel Voice Recording
+  const cancelRecording = async () => {
+    if (!recording) return;
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    try {
+      await recording.stopAndUnloadAsync();
+    } catch (err) { }
+
+    setRecording(null);
+    setIsRecording(false);
+    setRecordSeconds(0);
+  };
+
+  const sendAudioMessage = (uri: string, durationStr: string) => {
+    const timeNow = formatTime(new Date());
+    const newMsg: MessageItem = {
+      id: Date.now().toString(),
+      text: '',
+      audioUri: uri,
+      audioDuration: durationStr,
+      sender: 'me',
+      time: timeNow,
+    };
+
+    setMessages((prev) => [...prev, newMsg]);
+
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('sendMessage', {
+        to: contactId,
+        message: '🎤 Voice message',
+        audioUri: uri,
+        audioDuration: durationStr,
+        from: currentUserPhone,
+      });
+    }
+
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  // Play / Pause Voice Note
+  const handlePlayAudio = async (item: MessageItem) => {
+    if (!item.audioUri) return;
+
+    try {
+      // If tapping currently playing audio, stop it
+      if (playingAudioId === item.id) {
+        if (currentSoundRef.current) {
+          await currentSoundRef.current.stopAsync();
+          await currentSoundRef.current.unloadAsync();
+          currentSoundRef.current = null;
+        }
+        setPlayingAudioId(null);
+        return;
+      }
+
+      // Stop previous audio
+      if (currentSoundRef.current) {
+        await currentSoundRef.current.stopAsync();
+        await currentSoundRef.current.unloadAsync();
+        currentSoundRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: item.audioUri },
+        { shouldPlay: true }
+      );
+
+      currentSoundRef.current = sound;
+      setPlayingAudioId(item.id);
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingAudioId(null);
+          sound.unloadAsync().catch(() => { });
+          currentSoundRef.current = null;
+        }
+      });
+    } catch (err) {
+      console.log('Audio playback error', err);
+      Alert.alert('Playback Error', 'Could not play voice message.');
+      setPlayingAudioId(null);
+    }
+  };
+
+  // Toggle Emoji Picker
+  const toggleEmojiPicker = () => {
+    if (showEmojiPicker) {
+      setShowEmojiPicker(false);
+    } else {
+      Keyboard.dismiss();
+      setShowEmojiPicker(true);
+    }
   };
 
   const handleCall = (type: 'voice' | 'video') => {
@@ -355,6 +574,7 @@ export default function ChatMessageScreen() {
                     item.imageUri ? styles.imageBubble : null,
                   ]}
                 >
+                  {/* Photo Message */}
                   {item.imageUri ? (
                     <View style={styles.imageWrapper}>
                       <Image
@@ -366,6 +586,64 @@ export default function ChatMessageScreen() {
                     </View>
                   ) : null}
 
+                  {/* Voice Note Message */}
+                  {item.audioUri ? (
+                    <View style={styles.voiceNoteRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.voicePlayBtn,
+                          { backgroundColor: isMe ? '#ffffff' : theme.accent },
+                        ]}
+                        onPress={() => handlePlayAudio(item)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={playingAudioId === item.id ? 'pause' : 'play'}
+                          size={18}
+                          color={isMe ? theme.accent : '#ffffff'}
+                          style={{ marginLeft: playingAudioId === item.id ? 0 : 2 }}
+                        />
+                      </TouchableOpacity>
+
+                      <View style={styles.voiceWaveContainer}>
+                        <View style={styles.waveformBars}>
+                          {[6, 14, 18, 9, 15, 20, 16, 10, 17, 8, 19, 13, 9, 18, 12, 7, 15, 19, 9, 14].map(
+                            (barHeight, idx) => (
+                              <View
+                                key={idx}
+                                style={[
+                                  styles.waveformBar,
+                                  {
+                                    height: barHeight,
+                                    backgroundColor:
+                                      playingAudioId === item.id && idx < 10
+                                        ? '#53bdeb'
+                                        : isMe
+                                          ? '#a7f3d0'
+                                          : theme.subText,
+                                  },
+                                ]}
+                              />
+                            )
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.voiceDuration,
+                            { color: isMe ? '#d1fae5' : theme.subText },
+                          ]}
+                        >
+                          {item.audioDuration || '0:05'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.voiceMicBadge}>
+                        <Ionicons name="mic" size={17} color={isMe ? '#d1fae5' : theme.accent} />
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Text Message */}
                   {item.text ? (
                     <Text
                       style={[
@@ -415,62 +693,136 @@ export default function ChatMessageScreen() {
             styles.composerContainer,
             {
               backgroundColor: theme.composerBg,
-              paddingBottom: isKeyboardVisible ? 8 : Math.max(insets.bottom, 8),
+              paddingBottom: isKeyboardVisible || showEmojiPicker ? 8 : Math.max(insets.bottom, 8),
             },
           ]}
         >
-          <View style={[styles.inputContainer, { backgroundColor: theme.inputBg }]}>
-            <TouchableOpacity
-              style={styles.composerIconBtn}
-              activeOpacity={0.7}
-              onPress={() => Alert.alert('Emoji', 'Emoji picker opens here')}
-            >
-              <Ionicons name="happy-outline" size={24} color={theme.iconColor} />
-            </TouchableOpacity>
+          {isRecording ? (
+            /* Active Voice Recording UI */
+            <View style={[styles.recordingContainer, { backgroundColor: theme.inputBg }]}>
+              <View style={styles.recordingIndicator}>
+                <View style={styles.redDot} />
+                <Text style={[styles.recordingTimer, { color: theme.inputText }]}>
+                  {formatRecordTime(recordSeconds)}
+                </Text>
+              </View>
 
-            <TextInput
-              style={[styles.textInput, { color: theme.inputText }]}
-              value={message}
-              onChangeText={setMessage}
-              placeholder="Message"
-              placeholderTextColor={theme.iconColor}
-              multiline
-              maxLength={1000}
-            />
-
-            {/* Gallery / Attachment Picker */}
-            <TouchableOpacity
-              style={styles.composerIconBtn}
-              activeOpacity={0.7}
-              onPress={handleAttachmentPress}
-            >
-              <Ionicons name="attach-outline" size={24} color={theme.iconColor} />
-            </TouchableOpacity>
-
-            {/* Direct Camera Button */}
-            {!message.trim() && (
+              <TouchableOpacity
+                style={styles.cancelRecordBtn}
+                onPress={cancelRecording}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={22} color="#ef4444" />
+                <Text style={styles.cancelRecordText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            /* Standard Message Composer UI */
+            <View style={[styles.inputContainer, { backgroundColor: theme.inputBg }]}>
               <TouchableOpacity
                 style={styles.composerIconBtn}
                 activeOpacity={0.7}
-                onPress={handleTakePhoto}
+                onPress={toggleEmojiPicker}
               >
-                <Ionicons name="camera-outline" size={23} color={theme.iconColor} />
+                <Ionicons
+                  name={showEmojiPicker ? 'keypad-outline' : 'happy-outline'}
+                  size={24}
+                  color={showEmojiPicker ? theme.accent : theme.iconColor}
+                />
               </TouchableOpacity>
-            )}
-          </View>
 
+              <TextInput
+                style={[styles.textInput, { color: theme.inputText }]}
+                value={message}
+                onChangeText={setMessage}
+                onFocus={() => setShowEmojiPicker(false)}
+                placeholder="Message"
+                placeholderTextColor={theme.iconColor}
+                multiline
+                maxLength={1000}
+              />
+
+              {/* Gallery / Attachment Picker */}
+              <TouchableOpacity
+                style={styles.composerIconBtn}
+                activeOpacity={0.7}
+                onPress={handleAttachmentPress}
+              >
+                <Ionicons name="attach-outline" size={24} color={theme.iconColor} />
+              </TouchableOpacity>
+
+              {/* Direct Camera Button */}
+              {!message.trim() && (
+                <TouchableOpacity
+                  style={styles.composerIconBtn}
+                  activeOpacity={0.7}
+                  onPress={handleTakePhoto}
+                >
+                  <Ionicons name="camera-outline" size={23} color={theme.iconColor} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Action Button: Send or Mic */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: theme.sendButton }]}
-            onPress={message.trim() ? handleSend : () => Alert.alert('Voice Note', 'Hold to record voice message')}
+            style={[
+              styles.actionButton,
+              { backgroundColor: theme.sendButton },
+              isRecording ? styles.recordingActionButton : null,
+            ]}
+            onPress={
+              isRecording
+                ? stopAndSendRecording
+                : message.trim()
+                  ? handleSend
+                  : startRecording
+            }
             activeOpacity={0.8}
           >
-            {message.trim() ? (
+            {isRecording ? (
+              <Ionicons name="send" size={19} color="#ffffff" style={{ marginLeft: 2 }} />
+            ) : message.trim() ? (
               <Ionicons name="send" size={19} color="#ffffff" style={{ marginLeft: 2 }} />
             ) : (
               <Ionicons name="mic" size={22} color="#ffffff" />
             )}
           </TouchableOpacity>
         </View>
+
+        {/* EMOJI PICKER BOARD */}
+        {showEmojiPicker && (
+          <View style={[styles.emojiPickerBox, { backgroundColor: theme.composerBg }]}>
+            <View style={[styles.emojiHeader, { borderBottomColor: theme.border }]}>
+              <Text style={[styles.emojiHeaderLabel, { color: theme.subText }]}>EMOJIS</Text>
+              <TouchableOpacity
+                style={styles.backspaceBtn}
+                onPress={() => setMessage((prev) => prev.slice(0, -2))}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="backspace-outline" size={22} color={theme.iconColor} />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={EMOJIS}
+              keyExtractor={(item, index) => `${item}-${index}`}
+              numColumns={8}
+              contentContainerStyle={styles.emojiGrid}
+              keyboardShouldPersistTaps="always"
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.emojiCell}
+                  activeOpacity={0.6}
+                  onPress={() => setMessage((prev) => prev + item)}
+                >
+                  <Text style={styles.emojiChar}>{item}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -621,6 +973,47 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '500',
   },
+  voiceNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    minWidth: 210,
+  },
+  voicePlayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+  },
+  voiceWaveContainer: {
+    flex: 1,
+    marginHorizontal: 10,
+    justifyContent: 'center',
+  },
+  waveformBars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 22,
+    marginBottom: 2,
+  },
+  waveformBar: {
+    width: 3,
+    borderRadius: 2,
+    marginHorizontal: 1.5,
+  },
+  voiceDuration: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  voiceMicBadge: {
+    padding: 4,
+  },
   myMessageBubble: {
     borderTopLeftRadius: 14,
     borderTopRightRadius: 2,
@@ -672,6 +1065,48 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 1,
   },
+  recordingContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    height: 46,
+    marginRight: 6,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  redDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#ef4444',
+    marginRight: 8,
+  },
+  recordingTimer: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cancelRecordBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  cancelRecordText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
   composerIconBtn: {
     padding: 6,
     alignItems: 'center',
@@ -695,5 +1130,42 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
+  },
+  recordingActionButton: {
+    backgroundColor: '#ef4444',
+  },
+  emojiPickerBox: {
+    height: 250,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+  },
+  emojiHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  emojiHeaderLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  backspaceBtn: {
+    padding: 4,
+  },
+  emojiGrid: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  emojiCell: {
+    flex: 1 / 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+  },
+  emojiChar: {
+    fontSize: 26,
   },
 });
