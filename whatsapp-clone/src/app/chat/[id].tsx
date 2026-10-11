@@ -20,6 +20,7 @@ import { Image } from 'expo-image';
 import io, { Socket } from 'socket.io-client';
 import { currentUserPhone } from '../../authStore';
 import { useTheme } from '../../ThemeContext';
+import { getMessagesForChat, addMessageToChat, markChatRead } from '../../chatStore';
 
 const SOCKET_URL = 'http://10.120.123.254:3000';
 
@@ -61,14 +62,11 @@ export default function ChatMessageScreen() {
 
   const { darkMode, toggleTheme, theme } = useTheme();
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<MessageItem[]>([
-    {
-      id: 'init-1',
-      text: 'Hey there! How are you doing?',
-      sender: 'other',
-      time: '10:42 AM',
-    },
-  ]);
+  const [messages, setMessages] = useState<MessageItem[]>(() => getMessagesForChat(contactId));
+
+  useEffect(() => {
+    markChatRead(contactId);
+  }, [contactId]);
 
   const flatListRef = useRef<FlatList>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -130,21 +128,22 @@ export default function ChatMessageScreen() {
         newMessage &&
         (newMessage.sender === contactId || (newMessage.sender && newMessage.sender !== currentUserPhone))
       ) {
+        const receivedMsg: MessageItem = {
+          id: newMessage.id || Date.now().toString(),
+          text: newMessage.text || '',
+          imageUri: newMessage.imageUri,
+          audioUri: newMessage.audioUri,
+          audioDuration: newMessage.audioDuration,
+          sender: 'other',
+          time: newMessage.time || formatTime(new Date()),
+        };
+
         setMessages((prev) => {
-          if (prev.some((m) => m.id === newMessage.id)) return prev;
-          return [
-            ...prev,
-            {
-              id: newMessage.id || Date.now().toString(),
-              text: newMessage.text || '',
-              imageUri: newMessage.imageUri,
-              audioUri: newMessage.audioUri,
-              audioDuration: newMessage.audioDuration,
-              sender: 'other',
-              time: newMessage.time || formatTime(new Date()),
-            },
-          ];
+          if (prev.some((m) => m.id === receivedMsg.id)) return prev;
+          return [...prev, receivedMsg];
         });
+
+        addMessageToChat(contactId, contactName, receivedMsg);
       }
     });
 
@@ -190,6 +189,7 @@ export default function ChatMessageScreen() {
 
     setMessages((prev) => [...prev, newMsg]);
     setMessage('');
+    addMessageToChat(contactId, contactName, newMsg);
 
     if (socketRef.current?.connected) {
       socketRef.current.emit('sendMessage', {
@@ -277,6 +277,7 @@ export default function ChatMessageScreen() {
     };
 
     setMessages((prev) => [...prev, newMsg]);
+    addMessageToChat(contactId, contactName, newMsg);
 
     if (socketRef.current?.connected) {
       socketRef.current.emit('sendMessage', {
@@ -337,6 +338,7 @@ export default function ChatMessageScreen() {
     };
 
     setMessages((prev) => [...prev, newMsg]);
+    addMessageToChat(contactId, contactName, newMsg);
 
     if (socketRef.current?.connected) {
       socketRef.current.emit('sendMessage', {

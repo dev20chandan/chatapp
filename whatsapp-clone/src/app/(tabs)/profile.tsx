@@ -5,14 +5,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useTheme } from '../../ThemeContext';
+import { currentUserPhone, currentUserName, logoutUser } from '../../authStore';
 
 export default function ProfileScreen() {
   const { darkMode, toggleTheme, theme } = useTheme();
 
   const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
+    Alert.alert('Log out', 'Are you sure you want to log out of your account?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: () => router.replace('/') },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: async () => {
+          await logoutUser();
+          router.replace('/');
+        },
+      },
     ]);
   };
 
@@ -48,11 +56,17 @@ export default function ProfileScreen() {
         {/* Profile Card */}
         <View style={[styles.profileCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
-            <Text style={styles.avatarText}>M</Text>
+            <Text style={styles.avatarText}>
+              {currentUserName ? currentUserName.charAt(0).toUpperCase() : 'U'}
+            </Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={[styles.name, { color: theme.text }]}>My Profile</Text>
-            <Text style={[styles.status, { color: theme.accent }]}>Available • Online</Text>
+            <Text style={[styles.name, { color: theme.text }]}>
+              {currentUserName || 'My Account'}
+            </Text>
+            <Text style={[styles.status, { color: theme.accent }]}>
+              {currentUserPhone ? `+91 ${currentUserPhone}` : 'Available • Online'}
+            </Text>
           </View>
           <TouchableOpacity
             style={[styles.qrButton, { backgroundColor: darkMode ? '#1f2c34' : '#f4f4f5' }]}

@@ -13,7 +13,9 @@
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "READ_CONTACTS",
+        "WRITE_CONTACTS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -46,7 +48,13 @@
           "cameraPermission": "The app needs access to your camera to take and send photos in chat."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Chat to access your contacts."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
