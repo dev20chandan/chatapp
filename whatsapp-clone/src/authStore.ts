@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from './config';
 
 const STORAGE_KEYS = {
   USER_PHONE: '@chat_user_phone',
@@ -42,6 +43,35 @@ export const subscribeAuth = (listener: (session: AuthSession) => void) => {
   };
 };
 
+/**
+ * Sync user profile to backend MongoDB Atlas
+ */
+export const syncUserProfileWithBackend = async (
+  phone: string,
+  name: string,
+  about?: string,
+) => {
+  if (!phone) return;
+  try {
+    const res = await fetch(`${BACKEND_URL}/users/profile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        phone,
+        name,
+        about: about || 'Hey there! I am using Chat',
+      }),
+    });
+    if (!res.ok) {
+      console.warn('Failed to sync profile to backend:', res.status);
+    }
+  } catch (err) {
+    console.warn('Network error syncing profile to backend:', err);
+  }
+};
+
 // Initialize / load stored session from AsyncStorage
 export const initAuthSession = async (): Promise<AuthSession> => {
   try {
@@ -55,6 +85,9 @@ export const initAuthSession = async (): Promise<AuthSession> => {
       currentUserPhone = phone;
       currentUserName = name || `User ${phone.slice(-4)}`;
       isUserLoggedIn = true;
+
+      // Sync with backend in background to ensure up-to-date in DB
+      syncUserProfileWithBackend(currentUserPhone, currentUserName);
     } else {
       currentUserPhone = '';
       currentUserName = '';
@@ -77,7 +110,7 @@ export const initAuthSession = async (): Promise<AuthSession> => {
   return session;
 };
 
-// Login user and persist to AsyncStorage
+// Login user and persist to AsyncStorage & MongoDB
 export const setCurrentUserPhone = async (phone: string, name?: string) => {
   const cleanPhone = phone.replace(/[^\d+]/g, '');
   currentUserPhone = cleanPhone;
@@ -92,6 +125,29 @@ export const setCurrentUserPhone = async (phone: string, name?: string) => {
     ]);
   } catch (error) {
     console.warn('Error saving auth session to storage:', error);
+  }
+
+  // Register / sync in MongoDB backend
+  syncUserProfileWithBackend(currentUserPhone, currentUserName);
+
+  notifyAuthChange(false);
+};
+
+// Update display name and sync to backend MongoDB
+export const updateUserName = async (newName: string) => {
+  if (!newName || !newName.trim()) return;
+  const trimmed = newName.trim();
+  currentUserName = trimmed;
+
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.USER_NAME, trimmed);
+  } catch (error) {
+    console.warn('Error saving updated name to storage:', error);
+  }
+
+  // Sync with MongoDB backend
+  if (currentUserPhone) {
+    await syncUserProfileWithBackend(currentUserPhone, trimmed);
   }
 
   notifyAuthChange(false);

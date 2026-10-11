@@ -122,42 +122,88 @@ export default function SelectContactModal({
               data={filteredContacts}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContainer}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.chatItem,
-                    {
-                      backgroundColor: theme.card,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                  activeOpacity={0.7}
-                  onPress={() => onSelectContact(item)}
-                >
-                  <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
-                    <Text style={styles.avatarText}>
-                      {item.name ? item.name.charAt(0).toUpperCase() : '#'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.chatInfo}>
-                    <Text style={[styles.name, { color: theme.text }]}>{item.name}</Text>
-                    <View style={styles.messageRow}>
-                      <Ionicons
-                        name="call-outline"
-                        size={13}
-                        color={theme.subText}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text style={[styles.message, { color: theme.subText }]}>
-                        {item.phone}
+              renderItem={({ item }) => {
+                const isOnPlatform = !!item.isOnPlatform;
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.chatItem,
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: isOnPlatform ? `${theme.accent}60` : theme.border,
+                      },
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => onSelectContact(item)}
+                  >
+                    <View
+                      style={[
+                        styles.avatar,
+                        {
+                          backgroundColor: isOnPlatform ? theme.accent : '#94a3b8',
+                        },
+                      ]}
+                    >
+                      <Text style={styles.avatarText}>
+                        {item.name ? item.name.charAt(0).toUpperCase() : '#'}
                       </Text>
                     </View>
-                  </View>
 
-                  <Ionicons name="chevron-forward" size={18} color={theme.subText} />
-                </TouchableOpacity>
-              )}
+                    <View style={styles.chatInfo}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={[styles.name, { color: theme.text, flex: 1 }]} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        {isOnPlatform && (
+                          <View
+                            style={{
+                              backgroundColor: `${theme.accent}20`,
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 10,
+                              marginLeft: 6,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: theme.accent,
+                                fontSize: 11,
+                                fontWeight: '700',
+                              }}
+                            >
+                              On Chat
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={styles.messageRow}>
+                        <Ionicons
+                          name={isOnPlatform ? 'chatbubble-ellipses-outline' : 'call-outline'}
+                          size={13}
+                          color={isOnPlatform ? theme.accent : theme.subText}
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text
+                          style={[
+                            styles.message,
+                            { color: isOnPlatform ? theme.text : theme.subText },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {isOnPlatform ? item.message || item.phone : item.phone}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Ionicons
+                      name={isOnPlatform ? 'chatbubble' : 'chevron-forward'}
+                      size={18}
+                      color={isOnPlatform ? theme.accent : theme.subText}
+                    />
+                  </TouchableOpacity>
+                );
+              }}
             />
           ) : (
             <View style={styles.emptyContainer}>

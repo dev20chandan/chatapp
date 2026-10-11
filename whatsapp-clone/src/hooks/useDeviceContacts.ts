@@ -6,6 +6,7 @@ import {
   requestPermissionsAsync,
   getPermissionsAsync,
 } from 'expo-contacts';
+import { BACKEND_URL } from '../config';
 
 export interface DeviceContact {
   id: string;
@@ -15,6 +16,9 @@ export interface DeviceContact {
   time: string;
   unread: number;
   isDeviceContact: boolean;
+  isOnPlatform?: boolean;
+  platformName?: string;
+  about?: string;
 }
 
 export const sanitizePhoneNumber = (raw: string): string => {
@@ -61,7 +65,7 @@ export function useDeviceContacts() {
         return;
       }
 
-      // Permission granted - fetch contacts
+      // Permission granted - fetch device contacts locally
       const list: DeviceContact[] = [];
       const seenNumbers = new Set<string>();
 
@@ -96,6 +100,7 @@ export function useDeviceContacts() {
                       time: 'Contact',
                       unread: 0,
                       isDeviceContact: true,
+                      isOnPlatform: false,
                     });
                     break;
                   }
@@ -132,6 +137,7 @@ export function useDeviceContacts() {
                         time: 'Contact',
                         unread: 0,
                         isDeviceContact: true,
+                        isOnPlatform: false,
                       });
                       break;
                     }
@@ -145,11 +151,56 @@ export function useDeviceContacts() {
         }
       }
 
+      // Check registered users from backend WITHOUT sending contacts
+      // Only registered platform users are fetched, matching happens 100% locally on device
+      try {
+        const res = await fetch(`${BACKEND_URL}/users`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.users)) {
+            const registeredMap = new Map<
+              string,
+              { phone: string; name: string; about?: string }
+            >();
+            data.users.forEach((u: any) => {
+              const norm = (u.phone || '').replace(/\D/g, '').slice(-10);
+              if (norm) {
+                registeredMap.set(norm, u);
+              }
+            });
+
+            for (const item of list) {
+              const norm = item.phone.replace(/\D/g, '').slice(-10);
+              if (registeredMap.has(norm)) {
+                const reg = registeredMap.get(norm)!;
+                item.isOnPlatform = true;
+                item.platformName = reg.name;
+                item.about = reg.about;
+                item.message = reg.about || 'Hey there! I am using Chat';
+              }
+            }
+
+            // Prioritize registered platform users at the top
+            list.sort((a, b) => {
+              if (a.isOnPlatform && !b.isOnPlatform) return -1;
+              if (!a.isOnPlatform && b.isOnPlatform) return 1;
+              return a.name.localeCompare(b.name);
+            });
+          }
+        }
+      } catch (fetchErr) {
+        console.warn('Could not fetch registered users from backend:', fetchErr);
+      }
+
       setDeviceContacts(list);
 
       if (showFeedback) {
+        const onPlatformCount = list.filter((c) => c.isOnPlatform).length;
         if (list.length > 0) {
-          Alert.alert('Contacts Synced', `${list.length} phone contacts loaded successfully!`);
+          Alert.alert(
+            'Contacts Synced',
+            `${list.length} phone contacts loaded!\n${onPlatformCount} contacts are on Chat.`
+          );
         } else {
           Alert.alert(
             'No Contacts Found',

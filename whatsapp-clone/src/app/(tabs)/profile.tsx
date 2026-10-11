@@ -1,14 +1,65 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useTheme } from '../../ThemeContext';
-import { currentUserPhone, currentUserName, logoutUser } from '../../authStore';
+import {
+  currentUserPhone,
+  currentUserName,
+  logoutUser,
+  updateUserName,
+  subscribeAuth,
+} from '../../authStore';
 
 export default function ProfileScreen() {
   const { darkMode, toggleTheme, theme } = useTheme();
+
+  const [userName, setUserName] = useState(currentUserName);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [newNameInput, setNewNameInput] = useState(currentUserName);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setUserName(currentUserName);
+    const unsub = subscribeAuth((session) => {
+      setUserName(session.userName);
+    });
+    return unsub;
+  }, []);
+
+  const handleOpenEditName = () => {
+    setNewNameInput(userName);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveName = async () => {
+    if (!newNameInput.trim()) {
+      Alert.alert('Invalid Name', 'Name cannot be empty.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await updateUserName(newNameInput.trim());
+      setEditModalVisible(false);
+      Alert.alert('Profile Updated', 'Your display name has been updated and synced to the database!');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to update name.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Log out', 'Are you sure you want to log out of your account?', [
@@ -57,13 +108,22 @@ export default function ProfileScreen() {
         <View style={[styles.profileCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
             <Text style={styles.avatarText}>
-              {currentUserName ? currentUserName.charAt(0).toUpperCase() : 'U'}
+              {userName ? userName.charAt(0).toUpperCase() : 'U'}
             </Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={[styles.name, { color: theme.text }]}>
-              {currentUserName || 'My Account'}
-            </Text>
+            <View style={styles.nameRow}>
+              <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                {userName || 'My Account'}
+              </Text>
+              <TouchableOpacity
+                onPress={handleOpenEditName}
+                style={[styles.editIconBtn, { backgroundColor: `${theme.accent}15` }]}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="pencil" size={15} color={theme.accent} />
+              </TouchableOpacity>
+            </View>
             <Text style={[styles.status, { color: theme.accent }]}>
               {currentUserPhone ? `+91 ${currentUserPhone}` : 'Available • Online'}
             </Text>
@@ -78,15 +138,20 @@ export default function ProfileScreen() {
 
         {/* Section 1 */}
         <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <TouchableOpacity style={[styles.settingItem, { borderBottomColor: theme.border }]}>
+          <TouchableOpacity
+            style={[styles.settingItem, { borderBottomColor: theme.border }]}
+            onPress={handleOpenEditName}
+          >
             <View style={[styles.iconWrapper, { backgroundColor: darkMode ? '#1e3a5f' : '#e0f2fe' }]}>
-              <Ionicons name="key" size={20} color="#3b82f6" />
+              <Ionicons name="person" size={20} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: theme.text }]}>Account</Text>
-              <Text style={[styles.settingSubtitle, { color: theme.subText }]}>Privacy, security, change number</Text>
+              <Text style={[styles.settingTitle, { color: theme.text }]}>Profile Name</Text>
+              <Text style={[styles.settingSubtitle, { color: theme.subText }]}>
+                {userName || 'Set your display name'}
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.subText} />
+            <Ionicons name="pencil" size={16} color={theme.accent} />
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, { borderBottomColor: theme.border }]}>
@@ -140,6 +205,69 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Edit Name Modal */}
+      <Modal
+        visible={editModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalCard,
+              { backgroundColor: theme.card, borderColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Edit Your Name</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.subText }]}>
+              This name will be visible to your contacts on Chat.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.background,
+                  borderColor: theme.border,
+                },
+              ]}
+              placeholder="Enter your name..."
+              placeholderTextColor={theme.subText}
+              value={newNameInput}
+              onChangeText={setNewNameInput}
+              autoFocus
+              maxLength={30}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: theme.border, borderWidth: 1 }]}
+                onPress={() => setEditModalVisible(false)}
+                disabled={isSaving}
+              >
+                <Text style={[styles.modalBtnText, { color: theme.subText }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: theme.accent }]}
+                onPress={handleSaveName}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={[styles.modalBtnText, { color: '#ffffff', fontWeight: 'bold' }]}>
+                    Save
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -201,10 +329,23 @@ const styles = StyleSheet.create({
   userInfo: {
     flex: 1,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   name: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 4,
+    marginRight: 8,
+    maxWidth: '80%',
+  },
+  editIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   status: {
     fontSize: 14,
@@ -245,5 +386,59 @@ const styles = StyleSheet.create({
   },
   settingSubtitle: {
     fontSize: 13,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    marginBottom: 18,
+    lineHeight: 18,
+  },
+  modalInput: {
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  modalBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 80,
+  },
+  modalBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

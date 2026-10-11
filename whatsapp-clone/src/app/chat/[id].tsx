@@ -21,8 +21,8 @@ import io, { Socket } from 'socket.io-client';
 import { currentUserPhone } from '../../authStore';
 import { useTheme } from '../../ThemeContext';
 import { getMessagesForChat, addMessageToChat, markChatRead } from '../../chatStore';
+import { SOCKET_URL } from '../../config';
 
-const SOCKET_URL = 'http://10.120.123.254:3000';
 
 const EMOJIS = [
   '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -122,6 +122,42 @@ export default function ChatMessageScreen() {
         socket.emit('joinChat', currentUserPhone);
       }
     });
+
+    // Fetch conversation history from backend MongoDB
+    if (currentUserPhone && contactId) {
+      fetch(`${SOCKET_URL}/chat/history?user1=${currentUserPhone}&user2=${contactId}`)
+        .then((res) => res.json())
+        .then((history) => {
+          if (Array.isArray(history) && history.length > 0) {
+            const formatted: MessageItem[] = history.map((doc: any) => ({
+              id: doc._id || doc.id || Date.now().toString(),
+              text: doc.text || '',
+              imageUri: doc.imageUri,
+              audioUri: doc.audioUri,
+              audioDuration: doc.audioDuration,
+              sender: doc.sender === currentUserPhone ? 'me' : 'other',
+              time: doc.time,
+            }));
+            setMessages((prev) => {
+              const prevIds = new Set(prev.map((m) => m.id));
+              const newItems = formatted.filter((m) => !prevIds.has(m.id));
+              return [...prev, ...newItems];
+            });
+            const last = history[history.length - 1];
+            if (last) {
+              addMessageToChat(contactId, contactName, {
+                id: last._id || Date.now().toString(),
+                text: last.text,
+                imageUri: last.imageUri,
+                audioUri: last.audioUri,
+                sender: last.sender === currentUserPhone ? 'me' : 'other',
+                time: last.time,
+              });
+            }
+          }
+        })
+        .catch(() => {});
+    }
 
     socket.on('receiveMessage', (newMessage: any) => {
       if (
