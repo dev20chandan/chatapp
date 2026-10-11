@@ -38,9 +38,9 @@ export default function LoginScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.header }]} edges={['top']}>
       <StatusBar style="light" />
 
-      {/* WhatsApp Consistent Top Bar */}
+      {/* Consistent Top Bar */}
       <View style={[styles.headerBar, { backgroundColor: theme.header }]}>
-        <Text style={[styles.headerTitle, { color: theme.headerText }]}>WhatsApp</Text>
+        <Text style={[styles.headerTitle, { color: theme.headerText }]}>Chat</Text>
 
         <TouchableOpacity
           style={styles.themeToggleBtn}

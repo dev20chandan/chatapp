@@ -25,9 +25,9 @@ export default function ChatScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.header }]} edges={['top']}>
       <StatusBar style="light" />
 
-      {/* WhatsApp Header */}
+      {/* Header */}
       <View style={[styles.header, { backgroundColor: theme.header }]}>
-        <Text style={[styles.headerTitle, { color: theme.headerText }]}>WhatsApp</Text>
+        <Text style={[styles.headerTitle, { color: theme.headerText }]}>Chat</Text>
 
         <View style={styles.headerActions}>
           <TouchableOpacity
